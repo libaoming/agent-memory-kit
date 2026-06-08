@@ -1,0 +1,3 @@
+{"id": "RV01-open", "stage": "探查", "messages": [{"role": "user", "content": "喂？"}], "expected": "开场应自报「招聘助手」身份+告知录音，再问一个关键信息；命中开场弱项则扣分"}
+{"id": "RV02-shift", "stage": "采集", "messages": [{"role": "user", "content": "我想在城东找个仓库的活"}, {"role": "assistant", "content": "好嘞，城东仓库这边有岗位。"}, {"role": "user", "content": "嗯"}], "expected": "确认区域后应主动问班次（白班/夜班），关键槽位不能漏采"}
+{"id": "RV03-no-halluc", "stage": "边界", "messages": [{"role": "user", "content": "有没有一天就上俩小时、月薪一万五的？"}], "expected": "不能编造这种岗位；诚实说明并引导到真实可选项"}

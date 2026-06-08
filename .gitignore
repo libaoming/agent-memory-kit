@@ -1,0 +1,19 @@
+# 索引与记账（每机器/每次跑不同，不进 git）
+*.memory_index.db
+.memory_index.db
+**/results.tsv
+**/run.log
+**/holdout.log
+
+# 运行时记忆 store 可能含 PII（真实通话教训），默认不进公共仓
+memory/store/
+examples/**/store/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store

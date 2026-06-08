@@ -1,0 +1,7 @@
+{
+  "store_dir": "./store",
+  "db_path": "./.memory_index.db",
+  "exclude_files": ["index.md", "log.md", "README.md"],
+  "half_life_days": 30,
+  "output_format": "obsidian"
+}

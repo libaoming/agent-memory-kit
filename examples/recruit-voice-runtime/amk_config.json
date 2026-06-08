@@ -1,0 +1,12 @@
+{
+  "_comment": "evolve 配置示例：skill_loader_cmd 注入本例自带的招聘 agent prompt，judge 用同维度 rubric。换成你项目的 prompt 路径即可。project_root=. 让 judge/eval/tsv 落在本 example 目录。",
+  "project_root": ".",
+  "skill_loader_cmd": "cat ./prompts/recruiter.md",
+  "judge_file": "judge.md",
+  "eval_dir": "eval",
+  "results_tsv": "results.tsv",
+  "agent_model": "haiku",
+  "judge_model": "sonnet",
+  "skill_token_limit": 8000,
+  "role_labels": {"user": "用户", "assistant": "客服"}
+}

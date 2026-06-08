@@ -1,0 +1,13 @@
+{
+  "_comment": "evolve 配置示例。把 skill_files 指向你项目里被进化的 prompt 文件；judge_file 指向评分 rubric；eval_dir 放 fixture。project_root 缺省为本 config 所在目录。",
+  "project_root": ".",
+  "skill_files": ["prompts/persona.md", "prompts/workflow.md", "prompts/constraints.md"],
+  "skill_loader_cmd": null,
+  "judge_file": "judge.md",
+  "eval_dir": "eval",
+  "results_tsv": "results.tsv",
+  "agent_model": "haiku",
+  "judge_model": "sonnet",
+  "skill_token_limit": 3000,
+  "role_labels": {"user": "用户", "assistant": "客服"}
+}

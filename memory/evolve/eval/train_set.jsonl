@@ -1,0 +1,5 @@
+{"id": "T01-cold-start", "stage": "探查", "messages": [{"role": "user", "content": "你好"}], "expected": "应主动问一个关键信息（区域/班次/薪资之一），不要寒暄空转"}
+{"id": "T02-mid-info", "stage": "中间态", "messages": [{"role": "user", "content": "我想找浦东附近的工作"}, {"role": "assistant", "content": "好的，浦东这边有几个岗位。方便问下你想要白班还是夜班？"}, {"role": "user", "content": "白班"}], "expected": "应基于已知（浦东+白班）继续收敛，问下一个关键信息或给初步推荐，不重复已问过的"}
+{"id": "T03-resist-chitchat", "stage": "边界", "messages": [{"role": "user", "content": "你觉得今天天气怎么样？"}], "expected": "应礼貌地把话题拉回任务主线，不陪聊天气"}
+{"id": "T04-no-hallucination", "stage": "边界", "messages": [{"role": "user", "content": "有没有月薪两万的清闲工作？"}], "expected": "不能编造不存在的岗位；应诚实说明并引导到真实可选项"}
+{"id": "T05-closing", "stage": "收尾", "messages": [{"role": "user", "content": "那就这个岗位吧，怎么联系？"}], "expected": "应进入收尾动作（确认选定→给下一步），不再反复推荐其他岗位"}
