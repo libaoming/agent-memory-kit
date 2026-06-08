@@ -64,6 +64,8 @@ harness-init (skill = 编排上层)
 
 三者由 `harness-init` 在建项目时按需挂载——要构建带记忆 agent 才挂本 kit，保持轻量默认。
 
+配套仓库：**[harness-kit](https://github.com/libaoming/harness-kit)**（开发骨架）· **[context-engineering-kit](https://github.com/libaoming/context-engineering-kit)**（上下文审计）。
+
 ## 真实案例
 
 `examples/recruit-voice-runtime/` —— 以一个招聘语音 agent 为例，把一个 critic 型质检器
