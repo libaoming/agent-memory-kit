@@ -30,7 +30,9 @@ Store（持久记忆 *.md）
 ```
 
 > 原理对应 Anthropic 的工程主张：**agent 本体不负责记忆，记忆/复盘交给第二组 agent**——
-> 更客观、可异步、写入有闸门。详见 `docs/methodology.md`。
+> 更客观、可异步、写入有闸门。
+>
+> 📐 **完整调用链路**（热环 / 冷环 / 人在闭环里的 4 个锚点）见 [`docs/methodology.md`](docs/methodology.md#完整调用链路热环--冷环--人的锚点)。
 
 ## P0 现成的两块
 
