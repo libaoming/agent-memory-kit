@@ -54,14 +54,15 @@ Doer → trace → Reflector(critic + librarian) → Store → 检索注入回 D
 ## 横向对照：外部 agent memory 产品在解哪道题
 
 「agent memory」是个被滥用的标签，市面同名产品其实在解完全不同的题。用本 kit 的四角色
-坐标去拆，差异立刻清楚（两例采于 2026-06-18 Hacker News）：
+坐标去拆，差异立刻清楚（三例采于 2026-06-18~19 Hacker News / X）：
 
 | 产品 | 它的「记忆」是什么 | 命中本 kit 哪个角色 | 形态 |
 |---|---|---|---|
 | **Parcle**（parcle.ai） | 跨 70+ 系统的**业务数据**，建索引后按需检索一小撮 | 几乎全是 **retrieval**（机器全自动，无 reflector/人审） | 闭源 / 企业销售；自报 token −70%、agent 2x、97% 准确 |
 | **Draft**（github.com/idodekerobo/draft，MIT） | 团队的**产品决策/上下文**（采自 Slack/Granola/GitHub/会话） | **Capture→Review→Sync→Inject** ≈ Doer trace → **HITL 版 reflector** → librarian(git) → 注入 | 开源 / 本地优先；多 agent（CC/Codex/Cursor/Hermes） |
+| **Perplexity Brain in Computer**（2026-06-19 发布） | 跨会话**持续学习**沉淀的「上下文图谱」，给 Computer 建状态、越跑越有状态 | **retrieval（图谱检索）+ 隐式 librarian（自动累积状态）**，仍**无显式 reflector/人审** | 闭源 / Perplexity Max 研究预览 |
 
-两点对本 kit 的设计校验：
+三点对本 kit 的设计校验：
 
 1. **Parcle 证明「纯 retrieval」也能成产品**，但它没有 reflector/evolve 冷环——记忆只进不「反思提炼」，
    靠的是数据本身够结构化（企业数仓）。本 kit 面向的是**非结构化经验教训**（踩过的坑），所以
@@ -69,6 +70,18 @@ Doer → trace → Reflector(critic + librarian) → Store → 检索注入回 D
 2. **Draft 的 Review 步 = 一个 HITL 版 reflector**：机器提炼出的上下文更新先进 inbox 等人点头才入库。
    本 kit 的 `reflector` 目前是自动评估提炼，若要加「重要记忆人工确认才落库」这档，Draft 的
    inbox + 独立 clone git 同步是可直接抄的工程模式（呼应下文「人的 4 个不可替代锚点」）。
+3. **Perplexity Brain 与 Parcle 同属「全自动累积 + 纯检索/图谱」一派**，再次印证：当前能跑成商业产品的
+   agent memory，绝大多数砍掉了 reflector 冷环——它们赌的是**数据/交互信号本身够结构化**（企业数仓、
+   computer-use 操作轨迹、知识图谱），靠量取胜，不做「反思提炼」。本 kit 的分野因此更清楚：面向
+   **非结构化经验教训**（踩过的坑、判错的边界）时，缺了 critic 评估这道工序，记忆只会越积越噪、
+   检索召回越来越脏——reflector 不是可选项而是命门。三家产品同方向，反而把「本 kit 为什么不省 reflector」
+   这件事衬托得更立得住。
+
+> [!NOTE]
+> 2026-06-19 一个值得关注的外部信号：Agent Infra / 运行时记忆层同日在中（fastclaw/Workbuddy）、英
+> （Perplexity Brain、HN 一批 agent 框架/沙箱）两个阵营冒头，且 Product Hunt 当日 6+ 个「AI 员工 /
+> 主动型 AI」新品落地——「记忆层」正从概念变赛道。本 kit 的坐标价值正在于：当人人都喊 agent memory 时，
+> 用四角色把「在解哪道题」拆清楚，比追新产品更重要。
 
 ## 一条最小闭环（不依赖任何外部知识库）
 
