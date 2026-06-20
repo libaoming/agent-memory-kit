@@ -1,181 +1,166 @@
-# 方法论：运行时 agent 记忆的四角色
+> 🌏 **English** | [中文](methodology.zh-CN.md)
 
-## 起点：Anthropic「第二组 agent 做记忆」
+# Methodology: the four roles of runtime agent memory
 
-一个反直觉的工程主张：**别让 agent 边干活边记笔记/反思**。原因四条：
+## Starting point: Anthropic's "a second set of agents does the remembering"
 
-1. **上下文污染**：Doer 的 context 已被任务塞满，再叠反思会抢 token、稀释注意力。
-2. **自我合理化偏差**：刚做完决策的 agent 评判自己，天然倾向说"对"。
-3. **时序错配**：干活要快、要实时；复盘可以慢、可以离线、可以用更便宜的模型。
-4. **写入失控**：长期记忆是资产，得有独立闸门，不能让执行者随手改自己的宪法。
+A counterintuitive engineering stance: **don't let the agent take notes / reflect while it's working**. Four reasons:
 
-所以拆成 **Doer（无状态执行）+ 第二组 agent（评估/提炼）+ 持久记忆层**。这不是新发明，是
-actor-critic / generator-evaluator 架构落到 agent 记忆上的工程版（学术对应 Reflexion、
-Generative Agents 的「记忆流 + 反思」）。
+1. **Context pollution**: the Doer's context is already stuffed with the task; piling reflection on top steals tokens and dilutes attention.
+2. **Self-justification bias**: an agent judging itself right after making a decision naturally tends to say "correct."
+3. **Timing mismatch**: doing the work must be fast and real-time; review can be slow, offline, and run on a cheaper model.
+4. **Uncontrolled writes**: long-term memory is an asset; it needs an independent gate, and the executor must not casually rewrite its own constitution.
 
-## 四角色
+So you split it into **Doer (stateless execution) + a second set of agents (evaluate/distill) + a persistent memory layer**. This is not a new invention; it's the engineering version of the actor-critic / generator-evaluator architecture applied to agent memory (academically corresponding to Reflexion, and the "memory stream + reflection" of Generative Agents).
+
+## The four roles
 
 ```
-Doer → trace → Reflector(critic + librarian) → Store → 检索注入回 Doer
+Doer → trace → Reflector(critic + librarian) → Store → retrieve & inject back into Doer
 ```
 
-- **Doer**：无状态，每轮临时 context，只管完成任务。
-- **Trace**：带轮次顺序的完整轨迹（可读、可重放）。
-- **Reflector**：独立 context 的第二组 agent，两职——
-  - *critic*：评估这轮干得怎样、哪里错（结构化分数 + issue，不是自由文本）。
-  - *librarian*：提炼哪些值得沉淀成长期教训。
-- **Store**：结构化持久层，写入经闸门（限量/去重/校准）。
-- **检索注入**：下一次 Doer 启动时，按当前任务检索 top-k 注入——不是全量灌。
+- **Doer**: stateless, a fresh ephemeral context each round, only responsible for completing the task.
+- **Trace**: a complete trajectory with turn ordering (readable, replayable).
+- **Reflector**: a second set of agents in an isolated context, with two jobs —
+  - *critic*: evaluate how this round went and where it erred (a structured score + issues, not free text).
+  - *librarian*: distill which parts are worth committing as lasting lessons.
+- **Store**: a structured persistence layer; writes go through a gate (quota / dedup / calibration).
+- **Retrieve & inject**: next time the Doer starts, retrieve the top-k relevant to the current task and inject them — not a full dump.
 
-三个命门：trace 要完整可读、评估要结构化、Doer 与 Reflector 必须隔离 context（甚至不同模型）。
+Three critical points: the trace must be complete and readable, the evaluation must be structured, and the Doer and Reflector must be in isolated contexts (even different models).
 
-## 两层记忆，别混
+## Two layers of memory, don't conflate them
 
-| | 谁的记忆 | 工具归属 |
+| | Whose memory | Tool ownership |
 |---|---|---|
-| **运行时记忆** | 你 build 的产品 agent | 本 kit |
-| **开发时记忆** | Claude Code 跨会话开发协作 | harness-kit 的 STATUS.md / 个人 memory |
+| **Runtime memory** | the product agent you build | this kit |
+| **Dev-time memory** | Claude Code cross-session dev collaboration | harness-kit's STATUS.md / personal memory |
 
-本 kit 只管运行时。开发时记忆不要在这里重复造。
+This kit only handles runtime memory. Don't rebuild dev-time memory here.
 
-## 本 kit 是从四个真实实现抽象出来的
+## This kit is abstracted from four real implementations
 
-| 角色 | 来源实现 | 通用度 | 本 kit 状态 |
+| Role | Source implementation | Generality | State in this kit |
 |---|---|---|---|
-| 检索注入 | `recall/wiki_search.py` | 90% | ✅ retrieval/（路径/字段/输出格式参数化） |
-| 闭环优化 | `claude-sdk-playground/autoevolve` | 95% | ✅ evolve/（load_skill 改依赖注入） |
-| critic 评估 | `miaomiao-grader` | 中 | 🟡 reflector/（接口占位，grader 是第一个实例） |
-| librarian 持久 | `wiki-autoupdate.sh` | 中 | 🟡 librarian/（接口 + LocalMarkdown 最简实现；Obsidian 待抽） |
+| Retrieve & inject | `recall/wiki_search.py` | 90% | ✅ retrieval/ (paths/fields/output format parameterized) |
+| Closed-loop optimize | `claude-sdk-playground/autoevolve` | 95% | ✅ evolve/ (load_skill changed to dependency injection) |
+| critic evaluation | a quality grader | medium | 🟡 reflector/ (interface stub; the grader is the first instance) |
+| librarian persistence | `wiki-autoupdate.sh` | medium | 🟡 librarian/ (interface + minimal LocalMarkdown impl; Obsidian still to be abstracted) |
 
-为什么只抽两块成现成件：评估维度（招聘 5 维 vs 客服解决率）和持久层 schema（Obsidian vs Notion）
-是业务/系统特定的，强行通用化会产出「谁都不好用的抽象层」。所以这两块只钉接口契约，
-由业务方填——这是刻意的克制，不是没做完。
+Why only two parts are abstracted into ready-made components: the evaluation dimensions (e.g. a 5-dimension rubric vs. a support resolution rate) and the persistence-layer schema (Obsidian vs. Notion) are business/system specific, and force-generalizing them would produce "an abstraction layer nobody can use." So these two only pin down the interface contract and are filled in by the business side — this is deliberate restraint, not unfinished work.
 
-## 横向对照：外部 agent memory 产品在解哪道题
+## Lateral comparison: which problem external agent-memory products are actually solving
 
-「agent memory」是个被滥用的标签，市面同名产品其实在解完全不同的题。用本 kit 的四角色
-坐标去拆，差异立刻清楚（三例采于 2026-06-18~19 Hacker News / X）：
+"Agent memory" is an overloaded label; products under that name are in fact solving completely different problems. Decompose them along this kit's four-role coordinate system and the differences become immediately clear (the three examples below were collected 2026-06-18~19 from Hacker News / X):
 
-| 产品 | 它的「记忆」是什么 | 命中本 kit 哪个角色 | 形态 |
+| Product | What its "memory" is | Which role of this kit it hits | Form |
 |---|---|---|---|
-| **Parcle**（parcle.ai） | 跨 70+ 系统的**业务数据**，建索引后按需检索一小撮 | 几乎全是 **retrieval**（机器全自动，无 reflector/人审） | 闭源 / 企业销售；自报 token −70%、agent 2x、97% 准确 |
-| **Draft**（github.com/idodekerobo/draft，MIT） | 团队的**产品决策/上下文**（采自 Slack/Granola/GitHub/会话） | **Capture→Review→Sync→Inject** ≈ Doer trace → **HITL 版 reflector** → librarian(git) → 注入 | 开源 / 本地优先；多 agent（CC/Codex/Cursor/Hermes） |
-| **Perplexity Brain in Computer**（2026-06-19 发布） | 跨会话**持续学习**沉淀的「上下文图谱」，给 Computer 建状态、越跑越有状态 | **retrieval（图谱检索）+ 隐式 librarian（自动累积状态）**，仍**无显式 reflector/人审** | 闭源 / Perplexity Max 研究预览 |
+| **Parcle** (parcle.ai) | **business data** across 70+ systems, indexed and then retrieved on demand in small slices | almost entirely **retrieval** (fully automatic machine, no reflector / human review) | closed source / enterprise sales; self-reported token −70%, agent 2x, 97% accuracy |
+| **Draft** (github.com/idodekerobo/draft, MIT) | a team's **product decisions / context** (gathered from Slack/Granola/GitHub/sessions) | **Capture→Review→Sync→Inject** ≈ Doer trace → **HITL-style reflector** → librarian(git) → injection | open source / local-first; multi-agent (CC/Codex/Cursor/Hermes) |
+| **Perplexity Brain in Computer** (released 2026-06-19) | a "context graph" deposited from **continuous cross-session learning**, building state for Computer so it gets more stateful the more it runs | **retrieval (graph retrieval) + implicit librarian (auto-accumulating state)**, still **no explicit reflector / human review** | closed source / Perplexity Max research preview |
 
-三点对本 kit 的设计校验：
+Three things this validates about this kit's design:
 
-1. **Parcle 证明「纯 retrieval」也能成产品**，但它没有 reflector/evolve 冷环——记忆只进不「反思提炼」，
-   靠的是数据本身够结构化（企业数仓）。本 kit 面向的是**非结构化经验教训**（踩过的坑），所以
-   reflector 不能省，这正是两者分野。
-2. **Draft 的 Review 步 = 一个 HITL 版 reflector**：机器提炼出的上下文更新先进 inbox 等人点头才入库。
-   本 kit 的 `reflector` 目前是自动评估提炼，若要加「重要记忆人工确认才落库」这档，Draft 的
-   inbox + 独立 clone git 同步是可直接抄的工程模式（呼应下文「人的 4 个不可替代锚点」）。
-3. **Perplexity Brain 与 Parcle 同属「全自动累积 + 纯检索/图谱」一派**，再次印证：当前能跑成商业产品的
-   agent memory，绝大多数砍掉了 reflector 冷环——它们赌的是**数据/交互信号本身够结构化**（企业数仓、
-   computer-use 操作轨迹、知识图谱），靠量取胜，不做「反思提炼」。本 kit 的分野因此更清楚：面向
-   **非结构化经验教训**（踩过的坑、判错的边界）时，缺了 critic 评估这道工序，记忆只会越积越噪、
-   检索召回越来越脏——reflector 不是可选项而是命门。三家产品同方向，反而把「本 kit 为什么不省 reflector」
-   这件事衬托得更立得住。
+1. **Parcle proves that "pure retrieval" can also become a product**, but it has no reflector / evolve cold loop — memory only goes in and is never "reflected on and distilled," relying on the data itself being structured enough (an enterprise data warehouse). This kit targets **unstructured experience and lessons** (the pits you fell into), so the reflector cannot be skipped — that is precisely where the two diverge.
+2. **Draft's Review step = a HITL-style reflector**: the machine-distilled context update first lands in an inbox and waits for a human nod before entering the store. This kit's `reflector` is currently automatic evaluation and distillation; if you want to add the tier of "important memories only land in the store after human confirmation," Draft's inbox + a separate cloned git for syncing is an engineering pattern you can copy directly (echoing the "4 irreplaceable human anchors" below).
+3. **Perplexity Brain and Parcle belong to the same camp of "fully automatic accumulation + pure retrieval / graph,"** confirming once again: most agent-memory products that can currently run as commercial products have cut out the reflector cold loop — they bet that **the data / interaction signal itself is structured enough** (enterprise warehouse, computer-use operation traces, knowledge graph), winning on volume rather than doing "reflection and distillation." This kit's divergence is therefore clearer: when targeting **unstructured experience and lessons** (the pits you fell into, the boundaries you misjudged), without the critic-evaluation step, memory only grows noisier and retrieval recall only gets dirtier — the reflector is not optional but the critical point. Three products pointing the same way actually makes the case for "why this kit does not skip the reflector" stand up even more firmly.
 
 > [!NOTE]
-> 2026-06-19 一个值得关注的外部信号：Agent Infra / 运行时记忆层同日在中（fastclaw/Workbuddy）、英
-> （Perplexity Brain、HN 一批 agent 框架/沙箱）两个阵营冒头，且 Product Hunt 当日 6+ 个「AI 员工 /
-> 主动型 AI」新品落地——「记忆层」正从概念变赛道。本 kit 的坐标价值正在于：当人人都喊 agent memory 时，
-> 用四角色把「在解哪道题」拆清楚，比追新产品更重要。
+> A notable external signal on 2026-06-19: the Agent Infra / runtime-memory-layer space surfaced on the same day in both the Chinese (fastclaw / Workbuddy) and English (Perplexity Brain, a batch of agent frameworks / sandboxes on HN) camps, and Product Hunt that day had 6+ "AI employee / proactive AI" new products landing — the "memory layer" is turning from a concept into a competitive track. This kit's coordinate value lies exactly here: when everyone is shouting agent memory, using the four roles to dissect "which problem is it actually solving" matters more than chasing new products.
 
-## 一条最小闭环（不依赖任何外部知识库）
+## A minimal closed loop (depending on no external knowledge base)
 
 ```
-Doer 跑 → critic(你的质检器) 吐 Verdict
-       → librarian.LocalMarkdownAdapter 写 memory/store/*.md
-       → retrieval.memory_search 索引 + 检索
-       → 下次 Doer 开场注入 top-k
-       → 若 issue 累计超阈值 → evolve.prepare 跑 eval → 涨分才改 Doer prompt
+Doer runs → critic (your quality checker) emits a Verdict
+          → librarian.LocalMarkdownAdapter writes memory/store/*.md
+          → retrieval.memory_search indexes + retrieves
+          → next Doer opening injects top-k
+          → if accumulated issues exceed the threshold → evolve.prepare runs eval → only raise score → change Doer prompt
 ```
 
-`reflector` 接你已有的质检器，`librarian` 用内置 LocalMarkdownAdapter，`retrieval`/`evolve` 开箱即用。
+`reflector` plugs into your existing quality checker, `librarian` uses the built-in LocalMarkdownAdapter, and `retrieval` / `evolve` work out of the box.
 
-## 完整调用链路：热环 / 冷环 / 人的锚点
+## Full call chain: hot loop / cold loop / human anchors
 
-闭环的本质是**两个回路 + 一个共享 Store**：线上实时的「热环」全自动、人不介入；离线批处理的「冷环」机器自动跑，但尺子和校准靠人。人不在热环里，人锚在冷环的几个关键节点上。
+The essence of the closed loop is **two loops + one shared Store**: the online real-time "hot loop" is fully automatic with no human in it; the offline batch "cold loop" runs automatically on the machine, but its yardstick and calibration depend on humans. The human is not in the hot loop; the human is anchored at a few key nodes of the cold loop.
 
 ```
-═══════════════ 热环（线上 · 实时 · 全自动 · 人不介入）═══════════════
+═══════════════ HOT LOOP (online · real-time · fully automatic · no human) ═══════════════
 
-① Doer 要回复用户了（你的产品 agent）                       【自动 · 线上】
-      │  触发：每次任务 / 每轮对话
+① Doer is about to reply to the user (your product agent)        [auto · online]
+      │  trigger: every task / every conversation turn
       ▼
-② 检索注入（开场前的前置动作）                              【自动】
+② Retrieve & inject (a pre-action before the opening)            [auto]
       │  retrieval/memory_search.py
-      │  query = 当前场景词
-      │  ↓ FTS5(trigram) 全文 + LIKE 短词兜底
-      │  ↓ RRF 融合 + 时间衰减(半衰期)
-      │  → top-k 条历史教训 → 拼进 Doer 的 system prompt
+      │  query = current scenario terms
+      │  ↓ FTS5(trigram) full-text + LIKE short-word fallback
+      │  ↓ RRF fusion + time decay (half-life)
+      │  → top-k historical lessons → spliced into the Doer's system prompt
       ▼
-③ Doer 带着记忆回复用户                                     【自动 · 线上】
-      │  产出：一条 trace {role, text, turn}
+③ Doer replies to the user carrying the memory                   [auto · online]
+      │  output: one trace {role, text, turn}
       ▼
-   trace 落库 ── 热环到此结束，交给冷环 ──────────────────┐
-                                                          │
-═══════════════ 冷环（离线 · 批处理 · 机器自动，尺子/校准靠人）══│══════
+   trace persisted ── hot loop ends here, handed to the cold loop ──────────┐
+                                                                            │
+═══════════════ COLD LOOP (offline · batch · auto machine, yardstick/calibration by humans) ══│══
 
-④ Reflector · critic 评估                   【自动跑，⚠️ 尺子人定】│
-      │  你的质检器(实现 Evaluator 协议) 读 trace、用 rubric 打分 ◄┘
+④ Reflector · critic evaluation              [auto run, ⚠️ yardstick set by human] │
+      │  your quality checker (implements the Evaluator protocol) reads the trace, scores via rubric ◄┘
       │  → Verdict {score, issues[], one_line}
-      │  ⚠️ 「判得准不准」取决于：
-      │     · rubric 维度 = 👤 人定义（招聘 5 维 / 客服解决率…）
-      │     · judge 本身可信吗 = 👤 人校准过（一致率 > 0.90）
+      │  ⚠️ "how accurate the judgment is" depends on:
+      │     · the rubric dimensions = 👤 human-defined (a 5-dim rubric / support resolution rate…)
+      │     · is the judge itself trustworthy = 👤 human-calibrated (agreement rate > 0.90)
       ▼
-⑤ Reflector · librarian 沉淀                                【自动】
+⑤ Reflector · librarian deposit                                  [auto]
       │  librarian.LocalMarkdownAdapter → memory/store/*.md
       │  frontmatter: title/summary/type/tags/updated
       ▼
-⑥ Store（持久记忆层）                                       【自动】
+⑥ Store (persistent memory layer)                                [auto]
       │  memory/store/*.md
-      ├─────────────► 回流到 ②：下次 Doer 开场就能检索到它
-      │               （冷环产物喂回热环，闭环成立）
+      ├─────────────► flows back to ②: next Doer opening can retrieve it
+      │               (cold-loop output feeds back to the hot loop, closing the loop)
       │
-      ▼  当某类 issue 反复出现、累积到阈值
-⑦ Evolve（两条进化支路）
-   ├─ 支路A · 进化「被评对象」= agent 的 prompt   【自动产建议 → 人把关】
-   │    读 Store 高频 issue + 当前 prompt
-   │    → LLM 产出具体改写建议
-   │    → 👤 人 review 建议、决定改不改生产 prompt
-   │    → 改了就回到 ①，Doer 整体变好
+      ▼  when a class of issue recurs and accumulates to the threshold
+⑦ Evolve (two evolution branches)
+   ├─ branch A · evolve the "evaluated object" = the agent's prompt  [auto suggests → human gates]
+   │    reads high-frequency issues in the Store + the current prompt
+   │    → LLM produces concrete rewrite suggestions
+   │    → 👤 human reviews the suggestions, decides whether to change the production prompt
+   │    → once changed, back to ①, the Doer gets better overall
    │
-   └─ 支路B · 进化「评估器」= judge 这把尺子      【自动跑分，前置靠人】
-        evolve/prepare.py 范式：改 judge → 跑 eval → 涨分 keep、held_out 不漂移
-        ⚠️ 前置必须先有 👤 人标的 ground truth labels，
-           否则进化在拟合噪声 = 越跑越歪
+   └─ branch B · evolve the "evaluator" = the judge, that yardstick  [auto scoring, prerequisites by human]
+        evolve/prepare.py paradigm: change judge → run eval → keep if score rises, held_out must not drift
+        ⚠️ the prerequisite is that there must first be 👤 human-labeled ground-truth labels,
+           otherwise evolution is fitting noise = drifting further off the more it runs
 ```
 
-### 生效分三档（不是一启动就全自动）
+### Activation in three tiers (it is not fully automatic the moment you start)
 
 ```
-第 0 档（只有热环）：Doer 检索注入历史教训
-   生效条件：Store 已有教训 → 立刻自动转，无需人
-   （但 Store 怎么来的？得先有人定义 rubric、跑过冷环）
+Tier 0 (hot loop only): the Doer retrieves and injects historical lessons
+   activation condition: the Store already has lessons → it runs automatically at once, no human needed
+   (but where did the Store come from? a human must first define the rubric and run the cold loop)
 
-第 1 档（热环 + 冷环前半）：评估 → 沉淀 → 检索回流
-   生效条件：① 人定义 rubric 维度  ② 人校准 judge 到可信(>0.90)
-   满足后 ④⑤⑥ 自动批处理，教训自动回流热环
+Tier 1 (hot loop + first half of the cold loop): evaluate → deposit → retrieval feedback
+   activation conditions: ① human defines the rubric dimensions  ② human calibrates the judge to trustworthy (>0.90)
+   once met, ④⑤⑥ batch automatically, and lessons flow back into the hot loop automatically
 
-第 2 档（全闭环 + 进化）：agent 和尺子都自我改进
-   支路A 生效：自动产建议，但「改生产」这一刀必须人来切
-   支路B 生效：必须先有人标的 ground truth labels + 足够真实样本
+Tier 2 (full closed loop + evolution): both the agent and the yardstick self-improve
+   branch A activation: auto suggestions, but the cut of "change production" must be made by a human
+   branch B activation: there must first be human-labeled ground-truth labels + enough real samples
 ```
 
-### 人的 4 个不可替代锚点
+### The 4 irreplaceable human anchors
 
-机器负责**搬运和计算**（检索、打分、沉淀、产建议、跑分）；人锚在 4 个机器替不了的地方：
+The machine is responsible for **moving and computing** (retrieving, scoring, depositing, producing suggestions, running scores); the human is anchored at 4 places the machine cannot replace:
 
-| 锚点 | 人做什么 | 为什么 agent 替不了 |
+| Anchor | What the human does | Why the agent can't replace it |
 |---|---|---|
-| **定义尺子** | 写 judge rubric 的维度 | 评估维度是业务价值判断，因领域而异，没有通用解 |
-| **校准尺子** | 标 ground truth labels、验 judge 一致率 | **唯一绝对替不了的**——judge 拿什么当「对」的基准？只能是人标的真值。缺它，闭环在自我循环里拟合噪声 |
-| **把关改进** | review 改写建议、决定是否改生产 | 改动直接作用于线上 agent，不可逆，要人担责 |
-| **喂真实信号** | 攒真实样本扩 golden set | agent 造不出真实用户行为；样本代表性决定结论是否成立 |
+| **Define the yardstick** | write the dimensions of the judge rubric | evaluation dimensions are business value judgments, varying by domain, with no universal solution |
+| **Calibrate the yardstick** | label ground-truth labels, verify the judge's agreement rate | **the one absolutely irreplaceable thing** — what does the judge take as the "correct" baseline? Only human-labeled ground truth. Without it, the closed loop fits noise inside its own self-referential cycle |
+| **Gate improvements** | review rewrite suggestions, decide whether to change production | the change acts directly on the live agent, is irreversible, and a human must own the accountability |
+| **Feed real signal** | accumulate real samples to expand the golden set | the agent can't fabricate real user behavior; the representativeness of samples decides whether the conclusion holds |
 
-> **一句话**：机器让闭环转得快，人让闭环不转歪。
+> **In one line**: the machine makes the loop spin fast; the human keeps the loop from spinning off course.
 >
-> 这个架构里 agent 越自动，人越要守住「校准尺子」这个锚——一旦尺子歪了，机器会**用全速把 agent 优化到错误方向**。所以「宁可不进化，也不让它拟合噪声」是纪律，不是保守。
+> In this architecture, the more automatic the agent becomes, the more the human must hold the "calibrate the yardstick" anchor — once the yardstick bends, the machine will **optimize the agent toward the wrong direction at full speed**. So "rather not evolve than let it fit noise" is discipline, not conservatism.

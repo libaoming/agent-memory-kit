@@ -1,76 +1,84 @@
+> 🌏 **English** | [中文](README.zh-CN.md)
+
 # agent-memory-kit
 
-给「要构建带记忆的 agent」的项目，一套**运行时记忆层脚手架**。
+A **runtime memory-layer scaffold** for projects that need to build a memory-equipped agent.
 
-> ⚠️ **诚实定位：这是脚手架，不是即插即用的记忆中间件。**
-> 它给你骨架代码 + 注入点 + 纪律文档，让你少写 70% 的样板；但评估维度、持久层 schema
-> 这些业务特定的东西仍需你填。别指望 `pip install` 就有记忆。
+> ⚠️ **Honest framing: this is a scaffold, not a plug-and-play memory middleware.**
+> It hands you skeleton code + injection points + discipline docs, saving you ~70% of the boilerplate;
+> but the evaluation dimensions and the persistence-layer schema — the business-specific parts — are still
+> yours to fill in. Don't expect `pip install` to give you memory.
 
-## 它解决什么
+## What it solves
 
-大多数 agent 是无状态的：每次跑完即焚，上一次踩的坑下一次照踩。给它「记忆」通常要手搓四样东西——
-评估器、持久层、检索、闭环优化。本 kit 把其中**最通用的两块**抽成现成件，另两块给接口占位。
+Most agents are stateless: each run is fire-and-forget, and the pit you fell into last time you fall into again.
+Giving an agent "memory" usually means hand-rolling four things — an evaluator, a persistence layer, retrieval,
+and a closed-loop optimizer. This kit turns the **two most general ones** into ready-made parts, and leaves the
+other two as interface placeholders.
 
-## 记忆四角色
+## The four memory roles
 
 ```
-Doer（你的 agent · 无状态执行）
-   │ 留下 trace
+Doer (your agent · stateless execution)
+   │ leaves a trace
    ▼
-Reflector（第二组 agent · 独立 context）
-   ├─ critic   : 评估哪里错      → reflector/   🟡 接口占位(P1)
-   └─ librarian: 提炼成长期教训   → librarian/   🟡 接口占位(P2)
+Reflector (second set of agents · isolated context)
+   ├─ critic    : evaluate what went wrong   → reflector/   🟡 interface stub (P1)
+   └─ librarian : distill into lasting lessons → librarian/   🟡 interface stub (P2)
    │
    ▼
-Store（持久记忆 *.md）
+Store (persistent memory *.md)
    │
    ▼
-检索注入回 Doer                  → retrieval/    ✅ 可用(P0)
-                                   evolve/       ✅ 可用(P0)
+retrieve & inject back into Doer        → retrieval/    ✅ ready (P0)
+                                          evolve/       ✅ ready (P0)
 ```
 
-> 原理对应 Anthropic 的工程主张：**agent 本体不负责记忆，记忆/复盘交给第二组 agent**——
-> 更客观、可异步、写入有闸门。
+> This mirrors Anthropic's engineering stance: **the agent itself does not own memory; memory/reflection is
+> handed to a second set of agents** — more objective, asynchronous, and gated on write.
 >
-> 📐 **完整调用链路**（热环 / 冷环 / 人在闭环里的 4 个锚点）见 [`docs/methodology.md`](docs/methodology.md#完整调用链路热环--冷环--人的锚点)。
+> 📐 For the **full call chain** (hot loop / cold loop / the 4 human anchor points in the loop) see
+> [`docs/methodology.md`](docs/methodology.md#full-call-chain-hot-loop--cold-loop--human-anchors).
 
-## P0 现成的两块
+## The two ready-made P0 parts
 
-| 模块 | 作用 | 抽自 |
+| Module | Role | Distilled from |
 |---|---|---|
-| **retrieval/** | FTS5 + 时间衰减 + RRF 的检索注入，Doer 启动前捞 top-k 历史教训 | recall/wiki_search.py |
-| **evolve/** | fixture → agent → judge → TSV 记账的闭环优化，prompt 改了自动验分 | claude-sdk-playground/autoevolve |
+| **retrieval/** | FTS5 + time decay + RRF retrieval-injection; before the Doer starts, fetch the top-k historical lessons | recall/wiki_search.py |
+| **evolve/** | fixture → agent → judge → TSV-ledger closed-loop optimization; when the prompt changes, auto-verify the score | claude-sdk-playground/autoevolve |
 
-两块都是**纯标准库 + claude CLI 订阅模式（零 API 成本）**，配置经 JSON 注入，无硬编码路径。
+Both are **pure standard library + claude CLI subscription mode (zero API cost)**, configured via JSON injection, with no hardcoded paths.
 
-## 快速开始
+## Quick start
 
 ```bash
-# 1. 检索注入：把 store 配好，Doer 跑前捞历史教训
-python3 memory/retrieval/memory_search.py "你的场景关键词" --config your_config.json --top 5
+# 1. Retrieval-injection: wire up the store, fetch historical lessons before the Doer runs
+python3 memory/retrieval/memory_search.py "your scenario keywords" --config your_config.json --top 5
 
-# 2. 闭环优化：prompt 改了跑一次，看分涨没涨
+# 2. Closed-loop optimization: run once after changing the prompt, see whether the score went up
 python3 memory/evolve/prepare.py --config your_amk_config.json --runs 3
 ```
 
-## 和另外两个 kit 的关系
+## How it relates to the other two kits
 
 ```
-harness-init (skill = 编排上层)
-   ├─ harness-kit              开发时记忆 · L1-L4 防御脚手架
-   ├─ context-engineering-kit  CONTEXT.md · 7 层上下文审计
-   └─ agent-memory-kit         运行时记忆 · 本仓库
+harness-init (skill = orchestration layer on top)
+   ├─ harness-kit              dev-time memory · L1-L4 defense scaffold
+   ├─ context-engineering-kit  CONTEXT.md · 7-layer context audit
+   └─ agent-memory-kit         runtime memory · this repo
 ```
 
-三者由 `harness-init` 在建项目时按需挂载——要构建带记忆 agent 才挂本 kit，保持轻量默认。
+`harness-init` mounts all three on demand when bootstrapping a project — mount this kit only when you're building
+a memory-equipped agent, keeping the default lightweight.
 
-配套仓库：**[harness-kit](https://github.com/libaoming/harness-kit)**（开发骨架）· **[context-engineering-kit](https://github.com/libaoming/context-engineering-kit)**（上下文审计）。
+Companion repos: **[harness-kit](https://github.com/libaoming/harness-kit)** (dev scaffold) · **[context-engineering-kit](https://github.com/libaoming/context-engineering-kit)** (context audit).
 
-## 真实案例
+## Real-world example
 
-`examples/recruit-voice-runtime/` —— 以一个招聘语音 agent 为例，把一个 critic 型质检器
-接进本 kit：质检评出的 issue 沉淀进 store 供检索 + 质检 rubric 喂给 evolve 当进化标尺。
-自包含可独立跑，同时是 dogfood（验证抽象没把能用的脚本变成谁都不好用的抽象层）。
+`examples/recruit-voice-runtime/` — using a voice agent as the example, it wires a critic-style quality checker
+into this kit: the issues the checker scores get distilled into the store for retrieval, and the checker's rubric
+feeds evolve as the evolution yardstick. It is self-contained and runnable on its own, and at the same time serves
+as dogfood (verifying the abstraction didn't turn working scripts into an abstraction layer nobody can use).
 
 ## License
 
