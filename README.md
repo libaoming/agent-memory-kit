@@ -27,11 +27,13 @@ Reflector (second set of agents · isolated context)
    └─ librarian : distill into lasting lessons → librarian/   🟡 interface stub (P2)
    │
    ▼
-Store (persistent memory *.md)
+Store (persistent memory *.md · provenance + confidence · versioned claims)
    │
    ▼
 retrieve & inject back into Doer        → retrieval/    ✅ ready (P0)
                                           evolve/       ✅ ready (P0)
+   │
+   └─ expose to any MCP client          → mcp/          ✅ ready (stdio, zero-dep)
 ```
 
 > This mirrors Anthropic's engineering stance: **the agent itself does not own memory; memory/reflection is
@@ -44,10 +46,11 @@ retrieve & inject back into Doer        → retrieval/    ✅ ready (P0)
 
 | Module | Role | Distilled from |
 |---|---|---|
-| **retrieval/** | FTS5 + time decay + RRF retrieval-injection; before the Doer starts, fetch the top-k historical lessons | recall/wiki_search.py |
+| **retrieval/** | FTS5 + time decay + RRF retrieval-injection; before the Doer starts, fetch the top-k historical lessons. Carries per-memory **provenance** (source) + **confidence** (low-confidence memories get down-weighted) | recall/wiki_search.py |
 | **evolve/** | fixture → agent → judge → TSV-ledger closed-loop optimization; when the prompt changes, auto-verify the score | claude-sdk-playground/autoevolve |
+| **mcp/** | expose retrieval + write to any MCP client (Claude Code / Desktop / Cursor) over stdio; writes are **versioned claims** (updates archive the old claim, never overwrite) | — (borrows N71's bitemporal claim) |
 
-Both are **pure standard library + claude CLI subscription mode (zero API cost)**, configured via JSON injection, with no hardcoded paths.
+All are **pure standard library + claude CLI subscription mode (zero API cost)**, configured via JSON injection, with no hardcoded paths.
 
 ## Quick start
 
@@ -57,6 +60,9 @@ python3 memory/retrieval/memory_search.py "your scenario keywords" --config your
 
 # 2. Closed-loop optimization: run once after changing the prompt, see whether the score went up
 python3 memory/evolve/prepare.py --config your_amk_config.json --runs 3
+
+# 3. Expose as an MCP server (stdio, zero-dep) so any MCP client can search/write memory
+claude mcp add memory -- python3 memory/mcp/server.py --config your_config.json
 ```
 
 ## How it relates to the other two kits

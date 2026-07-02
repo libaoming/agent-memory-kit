@@ -9,8 +9,11 @@
     "tags": "tags",
     "type": "type",
     "updated": "updated",
-    "created": "created"
+    "created": "created",
+    "provenance": "provenance",
+    "confidence": "confidence"
   },
+  "conf_penalty": 0.5,
   "fts_weights": {"title": 10.0, "summary": 6.0, "tags": 4.0, "body": 1.0},
   "like_weights": {"title": 3, "summary": 2, "tags": 2, "body": 1},
   "rrf_k": 60,

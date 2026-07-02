@@ -24,11 +24,13 @@ Reflector（第二组 agent · 独立 context）
    └─ librarian: 提炼成长期教训   → librarian/   🟡 接口占位(P2)
    │
    ▼
-Store（持久记忆 *.md）
+Store（持久记忆 *.md · provenance 出处 + confidence 置信度 · 版本化 claim）
    │
    ▼
 检索注入回 Doer                  → retrieval/    ✅ 可用(P0)
                                    evolve/       ✅ 可用(P0)
+   │
+   └─ 暴露给任意 MCP 客户端        → mcp/          ✅ 可用(stdio · 零依赖)
 ```
 
 > 原理对应 Anthropic 的工程主张：**agent 本体不负责记忆，记忆/复盘交给第二组 agent**——
@@ -40,10 +42,11 @@ Store（持久记忆 *.md）
 
 | 模块 | 作用 | 抽自 |
 |---|---|---|
-| **retrieval/** | FTS5 + 时间衰减 + RRF 的检索注入，Doer 启动前捞 top-k 历史教训 | recall/wiki_search.py |
+| **retrieval/** | FTS5 + 时间衰减 + RRF 的检索注入，Doer 启动前捞 top-k 历史教训。每条记忆带 **provenance**（出处）+ **confidence**（低置信记忆自动降权） | recall/wiki_search.py |
 | **evolve/** | fixture → agent → judge → TSV 记账的闭环优化，prompt 改了自动验分 | claude-sdk-playground/autoevolve |
+| **mcp/** | 把检索 + 写入暴露给任意 MCP 客户端（Claude Code / Desktop / Cursor），stdio 传输；写入是**版本化 claim**（更新归档旧 claim，绝不覆盖） | —（borrow N71 的 bitemporal claim） |
 
-两块都是**纯标准库 + claude CLI 订阅模式（零 API 成本）**，配置经 JSON 注入，无硬编码路径。
+三块都是**纯标准库 + claude CLI 订阅模式（零 API 成本）**，配置经 JSON 注入，无硬编码路径。
 
 ## 快速开始
 
@@ -53,6 +56,9 @@ python3 memory/retrieval/memory_search.py "你的场景关键词" --config your_
 
 # 2. 闭环优化：prompt 改了跑一次，看分涨没涨
 python3 memory/evolve/prepare.py --config your_amk_config.json --runs 3
+
+# 3. 暴露成 MCP server（stdio · 零依赖），任意 MCP 客户端即可检索/写入记忆
+claude mcp add memory -- python3 memory/mcp/server.py --config your_config.json
 ```
 
 ## 和另外两个 kit 的关系

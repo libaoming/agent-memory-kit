@@ -27,9 +27,11 @@ DEFAULT_CONFIG = {
     # 不入库的文件名（索引/日志类）
     "exclude_files": ["index.md", "log.md"],
     # frontmatter 字段映射：逻辑名 -> 你 store 里的实际字段名
+    # provenance = 这条记忆的出处（来源事件/原文/发话人/URL）；confidence = 置信度 0-1
     "frontmatter_fields": {
         "title": "title", "summary": "summary", "tags": "tags",
         "type": "type", "updated": "updated", "created": "created",
+        "provenance": "provenance", "confidence": "confidence",
     },
     # FTS5 bm25 列权重（越大越相关）
     "fts_weights": {"title": 10.0, "summary": 6.0, "tags": 4.0, "body": 1.0},
@@ -39,6 +41,7 @@ DEFAULT_CONFIG = {
     "half_life_days": 90,   # 时间衰减半衰期（天）
     "recency_boost": 0.5,   # 时间衰减做温和加权的系数（不压倒相关性）
     "no_date_weight": 0.3,  # 无日期页的中性权重
+    "conf_penalty": 0.5,    # 置信度降权上限：低置信记忆最多打 (1-conf_penalty) 折；无 confidence 字段则中性(不影响)
     # 输出格式：obsidian | json | markdown
     "output_format": "obsidian",
 }
@@ -107,8 +110,24 @@ class MemoryStore:
                 "tags": self._field(fm, "tags"),
                 "type": self._field(fm, "type"),
                 "updated": self._field(fm, "updated") or self._field(fm, "created"),
+                "provenance": self._field(fm, "provenance"),
+                "confidence": self._field(fm, "confidence"),
                 "body": body,
             }
+
+    @staticmethod
+    def parse_confidence(raw):
+        """把 frontmatter 的 confidence 解析成 0-1 浮点；无/不可解析 → None（视为满置信、不降权）。
+        支持 '0.9'、'90'（当百分数）、'0.3'。"""
+        if raw is None or str(raw).strip() == "":
+            return None
+        try:
+            v = float(str(raw).strip().rstrip("%"))
+        except ValueError:
+            return None
+        if v > 1:
+            v = v / 100.0
+        return max(0.0, min(1.0, v))
 
     # ---------- 建索引 ----------
     def reindex(self):
@@ -117,11 +136,15 @@ class MemoryStore:
         db = sqlite3.connect(self.db_path)
         db.execute("""CREATE VIRTUAL TABLE pages USING fts5(
             path UNINDEXED, title, summary, tags, type UNINDEXED, updated UNINDEXED,
+            provenance UNINDEXED, confidence UNINDEXED,
             body, tokenize='trigram')""")
         n = 0
         for d in self.iter_pages():
-            db.execute("INSERT INTO pages(path,title,summary,tags,type,updated,body) VALUES(?,?,?,?,?,?,?)",
-                       (d["path"], d["title"], d["summary"], d["tags"], d["type"], d["updated"], d["body"]))
+            db.execute(
+                "INSERT INTO pages(path,title,summary,tags,type,updated,provenance,confidence,body) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (d["path"], d["title"], d["summary"], d["tags"], d["type"], d["updated"],
+                 d["provenance"], d["confidence"], d["body"]))
             n += 1
         db.commit(); db.close()
         return n
@@ -150,10 +173,10 @@ class MemoryStore:
         if fts_terms:
             match = " OR ".join('"%s"' % t.replace('"', '') for t in fts_terms)
             w = self.cfg["fts_weights"]
-            # 列序: path,title,summary,tags,type,updated,body
-            bm25 = f"bm25(pages, 0,{w['title']},{w['summary']},{w['tags']},0,0,{w['body']})"
+            # 列序: path,title,summary,tags,type,updated,provenance,confidence,body
+            bm25 = f"bm25(pages, 0,{w['title']},{w['summary']},{w['tags']},0,0,0,0,{w['body']})"
             try:
-                q = (f"SELECT path,title,summary,tags,type,updated, {bm25} AS r "
+                q = (f"SELECT path,title,summary,tags,type,updated,provenance,confidence, {bm25} AS r "
                      "FROM pages WHERE pages MATCH ? ORDER BY r LIMIT 60")
                 for i, row in enumerate(db.execute(q, (match,))):
                     fts_rank[row["path"]] = i
@@ -164,7 +187,7 @@ class MemoryStore:
         lw = self.cfg["like_weights"]
         for t in terms:
             like = f"%{t}%"
-            q = ("SELECT path,title,summary,tags,type,updated, "
+            q = ("SELECT path,title,summary,tags,type,updated,provenance,confidence, "
                  f"(CASE WHEN title LIKE ? THEN {lw['title']} ELSE 0 END)+"
                  f"(CASE WHEN summary LIKE ? THEN {lw['summary']} ELSE 0 END)+"
                  f"(CASE WHEN tags LIKE ? THEN {lw['tags']} ELSE 0 END)+"
@@ -178,6 +201,7 @@ class MemoryStore:
 
         K = self.cfg["rrf_k"]
         boost = self.cfg["recency_boost"]
+        penalty = self.cfg["conf_penalty"]
         like_sorted = sorted(like_rank, key=lambda p: -like_rank[p])
         like_pos = {p: i for i, p in enumerate(like_sorted)}
         scored = []
@@ -187,7 +211,10 @@ class MemoryStore:
             if p in like_pos: s += 1.0 / (K + like_pos[p])
             row = rows_by_path[p]
             rec = self.recency(row["updated"], half_life)
-            final = s * (1 + boost * rec)
+            # 置信度加权：无 confidence → 1.0（不影响，向后兼容）；有则低置信降权、高置信≈不变
+            conf = self.parse_confidence(row["confidence"])
+            conf_factor = 1.0 if conf is None else (1 - penalty) + penalty * conf
+            final = s * (1 + boost * rec) * conf_factor
             scored.append((final, rec, row))
         scored.sort(key=lambda x: -x[0])
         return scored[:top]
@@ -198,15 +225,23 @@ class MemoryStore:
         if fmt == "json":
             return json.dumps([
                 {"score": round(f * 1000, 1), "type": r["type"], "title": r["title"],
-                 "path": r["path"], "summary": r["summary"]}
+                 "path": r["path"], "summary": r["summary"],
+                 "confidence": self.parse_confidence(r["confidence"]),
+                 "provenance": r["provenance"] or None}
                 for f, rec, r in results
             ], ensure_ascii=False, indent=2)
         lines = []
         for f, rec, r in results:
+            conf = self.parse_confidence(r["confidence"])
+            tail = ""
+            if conf is not None:
+                tail += f"  ⟨conf {conf:.2f}⟩"
+            if r["provenance"]:
+                tail += f"  ⟨src {r['provenance']}⟩"
             if fmt == "markdown":
-                s = f"- **{r['title']}** ({r['type'] or '?'}) — {r['summary'][:90]}  `{r['path']}`"
+                s = f"- **{r['title']}** ({r['type'] or '?'}) — {r['summary'][:90]}  `{r['path']}`{tail}"
             else:  # obsidian
-                s = f"{f*1000:5.1f} | {r['type'] or '?':9} | [[{r['title']}]] | {r['path']}"
+                s = f"{f*1000:5.1f} | {r['type'] or '?':9} | [[{r['title']}]] | {r['path']}{tail}"
                 if r["summary"]:
                     s += f"\n        ↳ {r['summary'][:90]}"
             lines.append(s)
