@@ -34,9 +34,12 @@ class LocalMarkdownAdapter:
 
     HISTORY_HEADER = "## 历史 claim（版本化 · 非覆盖）"
 
-    def __init__(self, store_dir: str):
+    def __init__(self, store_dir: str, audit=None):
         self.store_dir = os.path.expanduser(store_dir)
         os.makedirs(self.store_dir, exist_ok=True)
+        # 可选 hash-chain 审计链（memory/audit/AuditLog 实例）；None=不记，行为字节级不变。
+        # 传入后每次写盘 append 一条防篡改 entry —— 记忆的「可追溯」底座。
+        self.audit = audit
 
     def write_page(self, title: str, content: str, metadata: dict) -> str:
         path = os.path.join(self.store_dir, f"{_slug(title)}.md")
@@ -86,6 +89,15 @@ class LocalMarkdownAdapter:
             body += f"\n{self.HISTORY_HEADER}\n{history.rstrip()}\n"
         with open(path, "w", encoding="utf-8") as f:
             f.write(fm + body)
+
+        # 写盘成功后落审计（version>1 = 版本化更新，否则新建/幂等覆盖）
+        if self.audit is not None:
+            action = "memory_update" if int(meta.get("version", 1) or 1) > 1 else "memory_write"
+            self.audit.append(
+                action, metadata.get("actor", "librarian"),
+                os.path.relpath(path, self.store_dir),
+                {k: meta[k] for k in ("version", "summary", "supersedes") if k in meta},
+            )
         return path
 
     def _read_prior(self, path: str):
