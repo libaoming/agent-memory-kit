@@ -47,6 +47,28 @@ cron / watcher / 定时任务触发的轮次没有人说话——trace 里的「
 为真时切换到收窄的评估口径。**有 cron 的 agent 不做这条隔离，跑得越久记忆越脏**——
 自主轮次通常远多于真人对话轮次，污染速度是碾压性的。
 
+## 触发策略：warm-up 递增阈值 + idle 兜底（`trigger.py`，borrow 自 TDB）
+
+Reflector **什么时候跑**和「怎么评」同样重要，且这半是通用的，所以给了实现而非占位。
+冷启动两难：批处理阈值定高了，新 Doer 跑半天一条记忆没有；定低了，稳态下每条 trace 都打
+一次 LLM。TencentDB-Agent-Memory 的 pipeline-manager 解法（已抄成 `trigger.py`，纯逻辑无 IO）：
+
+```
+threshold 从 1 起步 → 每成功跑一批翻倍 → 封顶稳态值(默认 5)
+  ⇒ 第 1 条 trace 就出第一批记忆，稳态后回到省钱的批处理
+idle 兜底(默认 60s)：不足一批但闲置超时也触发——凑不满批的尾巴不会永远等
+consolidation_due：librarian 重整 store 的「只提前不推迟」节流
+  （有新写入最快 15min 一次，无动静最慢 60min 兜底一次）
+```
+
+宿主（cron / Stop hook / daemon）喂 `n_pending` 与 idle 秒数即可：
+
+```python
+t = WarmupTrigger()                     # 5 条 / 60s / 15-60min 都可调
+if t.should_reflect(n_pending, idle_s): # → 跑 critic+librarian 一批
+    ...; t.record_batch_done()          # 成功才推进阈值；失败保持低阈值尽快重试
+```
+
 ## 第一个真实实例：miaomiao-grader
 
 miaomiao-grader 的 `grade.py` 就是一个现成的 critic Reflector：

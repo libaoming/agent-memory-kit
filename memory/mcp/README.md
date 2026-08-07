@@ -11,8 +11,8 @@ MCP 客户端（Claude Code / Claude Desktop / Cursor / 你自建 agent）。这
 
 | tool | 作用 |
 |---|---|
-| `memory_search(query, top=8, full=false)` | 按当前任务检索 top-k 相关记忆（当前视图 + `confidence` + `provenance`）。**两段式**：默认只回轻量 index 行（title/summary/path）；对真正相关的少量条目再传 `full=true` 取正文全文。|
-| `memory_write(title, content, summary, …)` | 落盘一条记忆；同名再写自动**版本化**归档旧 claim。可带 `provenance`/`confidence`/`change_reason`/`contradiction`，写后自动重建索引。config 有 `steering` 时其「记什么」声明自动注入本工具描述；`read_only: true` 时本工具不暴露。|
+| `memory_search(query, top=8, full=false, path=…)` | 按当前任务检索 top-k 相关记忆（当前视图 + `confidence` + `provenance`）。**两段式**：默认只回轻量 index 行（title/summary/path）；对真正相关的少量条目再传 `full=true` 取正文。`full` 自带**召回双预算闸**（单条 `max_chars_per_memory` + 总量 `max_total_recall_chars`，borrow 自 TDB）：靠前条目拿完整预算，长尾降级为 path 指针，截断会指路不静默丢；被截断的条目可传 `path` **单取**（独占整个总预算），纯 MCP 客户端也拿得到全文。|
+| `memory_write(title, content, summary, …)` | 落盘一条记忆；同名再写自动**版本化**归档旧 claim。可带 `provenance`/`confidence`/`change_reason`/`contradiction`，写后自动重建索引。**新 title 首写过冲突闸**（`dedup_gate`，默认开，borrow 自 TDB batchDedup）：命中相似旧记忆时先返回候选，要求判定四元组 `store/update/merge/skip`——判 store 则重发并传 `dedup_checked=true`。config 有 `steering` 时其「记什么」声明自动注入本工具描述；`read_only: true` 时本工具不暴露。|
 
 ## 在客户端注册（stdio）
 

@@ -83,12 +83,19 @@ memory/store/
   2. **后读正文**：对真正相关的 2-3 条再取全文注入——CLI 加 `--full`（MCP 传 `full: true`），
      文件型 Doer 也可直接按 path 读 store 原文
 - 红线走 `--scope org`，经验走 `--scope task`；**别第一段就 `--full` 全量灌**。
+- **注入位置纪律（缓存感知，borrow 自 TDB auto-recall）**：稳定内容进 system 尾部，变动内容进
+  user 前缀——org 红线全量、记忆使用指南这类每轮不变的块放 system prompt 尾部吃 prompt cache；
+  按 query 变化的 task top-k 放 user prompt 前缀。反着放会每轮打爆 system 缓存，白花钱。
+- `--full` 取正文自带**双预算闸**（单条 `max_chars_per_memory` + 总量 `max_total_recall_chars`）：
+  排名靠前的记忆拿完整预算，长尾自动降级成 path 指针——预算内截断会指路，不静默丢内容。
 - 一轮运行结束：trace → Reflector 评估/提炼 → 写 `memory/store/task/`（守上面两条写入纪律）。
 - 别让 Doer 直接写长期记忆——写入必须过 Reflector 这道闸门。
 
 ## P0 现状（本 kit MVP）
 
-- ✅ `retrieval/` 检索注入：可用（FTS5 + 时间衰减 + RRF + scope 分层过滤 `--scope`）。
+- ✅ `retrieval/` 检索注入：可用（FTS5 + 时间衰减 + RRF + scope 分层过滤 `--scope` + 召回双预算）。
 - ✅ `evolve/` 闭环优化：可用（fixture → agent → judge → TSV 记账）。
-- 🟡 `reflector/` critic 评估：**接口占位**，接你自己的质检器（见该目录 README）。
+- ✅ `mcp/` 挂载：可用（memory_search/memory_write + steering + read_only + 冲突闸四元组）。
+- 🟡 `reflector/` critic 评估：**接口占位**，接你自己的质检器；触发策略 `trigger.py`
+  （warm-up 递增阈值 + idle 兜底）已可用（见该目录 README）。
 - 🟡 `librarian/` 持久层适配：**接口占位**，接你的知识库后端（见该目录 README）。

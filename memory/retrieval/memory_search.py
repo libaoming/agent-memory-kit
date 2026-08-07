@@ -43,6 +43,9 @@ DEFAULT_CONFIG = {
     "recency_boost": 0.5,   # 时间衰减做温和加权的系数（不压倒相关性）
     "no_date_weight": 0.3,  # 无日期页的中性权重
     "conf_penalty": 0.5,    # 置信度降权上限：低置信记忆最多打 (1-conf_penalty) 折；无 confidence 字段则中性(不影响)
+    # 召回预算闸（borrow 自 TDB applyRecallBudget）：--full 取正文时的单条/总量双预算（字符数）
+    "max_chars_per_memory": 6000,
+    "max_total_recall_chars": 20000,
     # 输出格式：obsidian | json | markdown
     "output_format": "obsidian",
 }
@@ -236,29 +239,51 @@ class MemoryStore:
         return scored[:top]
 
     # ---------- 正文取回（两段式第二段） ----------
-    BODY_MAX_CHARS = 6000
-
-    def body_of(self, relpath):
-        """按 index 行的 path 取该条记忆正文（剥 frontmatter，超长截断）。"""
+    def body_of(self, relpath, limit=None):
+        """按 index 行的 path 取该条记忆正文（剥 frontmatter，超预算截断）。
+        截断按 Python str 切片即 code point 级，天然不撕字符（TDB 在 JS 里要专门防 UTF-16 代理对）；
+        截断后缀指路：告诉模型去哪补全文，而非静默丢内容。"""
+        if limit is None:
+            limit = int(self.cfg.get("max_chars_per_memory", 6000))
         try:
             _, body = self.parse_md(os.path.join(self.store_dir, relpath))
         except OSError:
             return "（正文读取失败）"
         body = body.strip()
-        if len(body) > self.BODY_MAX_CHARS:
-            body = body[: self.BODY_MAX_CHARS] + "\n…（正文截断）"
+        if len(body) > limit:
+            body = (body[:limit].rstrip()
+                    + f"\n…（截断：memory_search 传 path={relpath} 单取全文，或直接读 store 该文件）")
         return body
+
+    def budgeted_bodies(self, paths):
+        """召回预算闸（borrow 自 TDB applyRecallBudget）：单条 + 总量双预算。
+        返回 {path: body}。总预算耗尽后，剩余条目给指路占位而非正文——
+        排名靠前的记忆拿完整预算，长尾降级成 path 指针，防一次 full 召回打爆 context。"""
+        per = int(self.cfg.get("max_chars_per_memory", 6000))
+        total = int(self.cfg.get("max_total_recall_chars", 20000))
+        remaining = total
+        out = {}
+        for p in paths:
+            if remaining <= 0:
+                out[p] = (f"（召回总预算 {total} 字符已用尽——需要时 memory_search 传 "
+                          f"path={p} 单取全文，或直接读 store 该文件）")
+                continue
+            body = self.body_of(p, limit=min(per, remaining))
+            remaining -= len(body)
+            out[p] = body
+        return out
 
     # ---------- 输出格式 ----------
     def format(self, results, full=False):
         fmt = self.cfg["output_format"]
+        bodies = self.budgeted_bodies([r["path"] for _, _, r in results]) if full else {}
         if fmt == "json":
             return json.dumps([
                 {"score": round(f * 1000, 1), "type": r["type"], "title": r["title"],
                  "path": r["path"], "scope": r["scope"], "summary": r["summary"],
                  "confidence": self.parse_confidence(r["confidence"]),
                  "provenance": r["provenance"] or None,
-                 **({"body": self.body_of(r["path"])} if full else {})}
+                 **({"body": bodies[r["path"]]} if full else {})}
                 for f, rec, r in results
             ], ensure_ascii=False, indent=2)
         lines = []
@@ -278,7 +303,7 @@ class MemoryStore:
                 if r["summary"]:
                     s += f"\n        ↳ {r['summary'][:90]}"
             if full:
-                body = self.body_of(r["path"])
+                body = bodies[r["path"]]
                 s += "\n" + "\n".join("    " + ln for ln in body.splitlines())
             lines.append(s)
         return "\n".join(lines)

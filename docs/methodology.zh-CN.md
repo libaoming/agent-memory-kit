@@ -56,7 +56,8 @@ Doer → trace → Reflector(critic + librarian) → Store → 检索注入回 D
 ## 横向对照：外部 agent memory 产品在解哪道题
 
 「agent memory」是个被滥用的标签，市面同名产品其实在解完全不同的题。用本 kit 的四角色
-坐标去拆，差异立刻清楚（前三例采于 2026-06-18~19 Hacker News / X，第四例于 2026-08-01 读源码采集）：
+坐标去拆，差异立刻清楚（前三例采于 2026-06-18~19 Hacker News / X，第四、五例分别于
+2026-08-01 / 2026-08-07 读源码采集）：
 
 | 产品 | 它的「记忆」是什么 | 命中本 kit 哪个角色 | 形态 |
 |---|---|---|---|
@@ -64,8 +65,9 @@ Doer → trace → Reflector(critic + librarian) → Store → 检索注入回 D
 | **Draft**（github.com/idodekerobo/draft，MIT） | 团队的**产品决策/上下文**（采自 Slack/Granola/GitHub/会话） | **Capture→Review→Sync→Inject** ≈ Doer trace → **HITL 版 reflector** → librarian(git) → 注入 | 开源 / 本地优先；多 agent（CC/Codex/Cursor/Hermes） |
 | **Perplexity Brain in Computer**（2026-06-19 发布） | 跨会话**持续学习**沉淀的「上下文图谱」，给 Computer 建状态、越跑越有状态 | **retrieval（图谱检索）+ 隐式 librarian（自动累积状态）**，仍**无显式 reflector/人审** | 闭源 / Perplexity Max 研究预览 |
 | **qm**（github.com/yc-software/qm，MIT） | 一个人 / 一个房间的**长期事实**（谁是谁、在做什么、习惯怎么工作）——一个 markdown notebook，硬顶 300 条 | **完整的 librarian**（逐轮抽取 + 定期整理）**外加写入侧 scope 约束**；**完全没有 critic**，也没有检索——notebook 尾部整段注入 | 开源 / YC 官方；14 万行 TS 的系统里，记忆层只有 680 行 |
+| **TencentDB-Agent-Memory**（github.com/TencentCloud，MIT） | **一队 agent 共享的四类记忆资产**：对话沉淀（L0→L3 分层）/ skill / wiki / 代码图谱，经「装备清单」按 agent 绑定注入 | **librarian + store + retrieval 的极大化**（五段式抽取、冲突四元组、召回预算、ACL/多租户）；**没有 critic、没有 evolve**——prompt 全是硬编码常量，也无时间衰减 | 开源 / 15.5 万行 TS；测试随发布被剥离 |
 
-四点对本 kit 的设计校验：
+五点对本 kit 的设计校验：
 
 1. **Parcle 证明「纯 retrieval」也能成产品**，但它没有 reflector/evolve 冷环——记忆只进不「反思提炼」，
    靠的是数据本身够结构化（企业数仓）。本 kit 面向的是**非结构化经验教训**（踩过的坑），所以
@@ -89,6 +91,14 @@ Doer → trace → Reflector(critic + librarian) → Store → 检索注入回 D
    一组闭源产品不可能展示的**写入侧闸门**：不可信出处改写、禁止从 assistant 自己的回复推导偏好的抽取契约、
    无人说话的自主轮次降级规则、以及输出结构化动作而非重写全文的整理方式。这四条已落进
    `librarian/README.md` 与 `reflector/README.md`。
+5. **TencentDB-Agent-Memory 是本 kit 的镜像**：它把 librarian+store+retrieval 做到工业级
+   （15.5 万行），却整仓找不到 critic 与 evolve——prompt 全是硬编码常量，没有 judge、没有
+   「这条记忆有没有帮到下一次」的回路；反过来，它召回不看新鲜度、confidence 存了但不参与降权，
+   恰是本 kit retrieval 已有的两样。**两者互为对方的空洞**，这比第三票「大厂也砍 critic」更有信息量：
+   连资源最厚的实现也先把沉淀侧做到极致而非闭环侧，说明 critic/evolve 难在「要定义质量标尺」
+   而不是难在工程。从它抄回来五个设计并已落地：warm-up 递增触发 + idle 兜底（`reflector/trigger.py`）、
+   冲突决策四元组（MCP `memory_write` 冲突闸）、召回双预算 + 截断指路（`retrieval`）、
+   缓存感知注入拆分（`MEMORY.md` 启动协议）、先分类再打分的双闸门（`librarian/README.md` + steering）。
 
 > [!NOTE]
 > 2026-06-19 一个值得关注的外部信号：Agent Infra / 运行时记忆层同日在中（fastclaw/Workbuddy）、英

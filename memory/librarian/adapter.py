@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import glob
 import os
 import re
 from datetime import date
@@ -41,8 +42,35 @@ class LocalMarkdownAdapter:
         # 传入后每次写盘 append 一条防篡改 entry —— 记忆的「可追溯」底座。
         self.audit = audit
 
+    def path_for(self, title: str) -> str:
+        """title → 新建时的默认落盘路径（store 根）。「同名是否已存在」的判据用
+        find_by_title（按 frontmatter title 精确比对、全树含 org//task/ 子目录），
+        不用本方法的 path 存在性——slug 会把不同 title 折叠到同一文件名，path 冒充不了 title。"""
+        return os.path.join(self.store_dir, f"{_slug(title)}.md")
+
+    def find_by_title(self, title: str):
+        """全树（含 scope 子目录）按 frontmatter title 精确查找已有记忆；返回绝对路径或 None。
+        无 title 字段的手写文件退化为按 slug 文件名匹配。冲突四元组的 update/merge
+        分支（同名再写）以此定位，保证版本化写回原 scope 位置而非在根目录造重复。"""
+        slug_name = f"{_slug(title)}.md"
+        for p in sorted(glob.glob(os.path.join(self.store_dir, "**", "*.md"), recursive=True)):
+            prior = self._read_prior(p)
+            t = (prior or {}).get("meta", {}).get("title")
+            if t == title or (not t and os.path.basename(p) == slug_name):
+                return p
+        return None
+
     def write_page(self, title: str, content: str, metadata: dict) -> str:
-        path = os.path.join(self.store_dir, f"{_slug(title)}.md")
+        path = self.find_by_title(title)
+        if path is None:
+            path = self.path_for(title)
+            # slug 碰撞防误并：同 slug 但 title 不同的文件已占位 → 加序号后缀新建，
+            # 绝不把无关 title 的内容「版本化」进别人的条目
+            if os.path.exists(path):
+                base, i = path[:-3], 2
+                while os.path.exists(f"{base}-{i}.md"):
+                    i += 1
+                path = f"{base}-{i}.md"
         meta = {
             "title": title,
             "type": metadata.get("type", "lesson"),
