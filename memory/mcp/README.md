@@ -11,8 +11,8 @@ MCP 客户端（Claude Code / Claude Desktop / Cursor / 你自建 agent）。这
 
 | tool | 作用 |
 |---|---|
-| `memory_search(query, top=8)` | 按当前任务检索 top-k 相关记忆（当前视图 + `confidence` + `provenance`）。Doer 启动前注入相关历史教训。|
-| `memory_write(title, content, summary, …)` | 落盘一条记忆；同名再写自动**版本化**归档旧 claim。可带 `provenance`/`confidence`/`change_reason`/`contradiction`，写后自动重建索引。|
+| `memory_search(query, top=8, full=false)` | 按当前任务检索 top-k 相关记忆（当前视图 + `confidence` + `provenance`）。**两段式**：默认只回轻量 index 行（title/summary/path）；对真正相关的少量条目再传 `full=true` 取正文全文。|
+| `memory_write(title, content, summary, …)` | 落盘一条记忆；同名再写自动**版本化**归档旧 claim。可带 `provenance`/`confidence`/`change_reason`/`contradiction`，写后自动重建索引。config 有 `steering` 时其「记什么」声明自动注入本工具描述；`read_only: true` 时本工具不暴露。|
 
 ## 在客户端注册（stdio）
 
@@ -37,6 +37,13 @@ Claude Code：`claude mcp add memory -- python3 /abs/path/agent-memory-kit/memor
 `--config` 复用 `retrieval/` 的 config（`store_dir` / `db_path` / `frontmatter_fields` /
 `conf_penalty` …），见 [`../retrieval/config.example.json`](../retrieval/config.example.json)。
 缺省则用内置默认（指向 Obsidian vault）。
+
+挂载接口另有两个槽位（对齐官方 memory 的 steering prompt + read-only store 设计）：
+
+- `steering`：「记什么/不记什么」声明。非空时自动前置进 `memory_write` 的工具描述，
+  挂载的 agent 在写入前就能看到入库标准——不用改客户端 prompt。
+- `read_only`：`true` = 只读挂载。`tools/list` 不再暴露 `memory_write`，硬调用也会被拒。
+  适合把同一个 store 以只读方式挂给多个消费端、写入只走 Reflector 单闸门的拓扑。
 
 ## 自测（不装任何客户端）
 

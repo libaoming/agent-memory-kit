@@ -29,19 +29,22 @@ from memory_search import MemoryStore, load_config  # noqa: E402
 from adapter import LocalMarkdownAdapter  # noqa: E402
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_INFO = {"name": "agent-memory-kit", "version": "0.1.0"}
+SERVER_INFO = {"name": "agent-memory-kit", "version": "0.2.0"}
 
 TOOLS = [
     {
         "name": "memory_search",
         "description": ("检索运行时记忆 store，按当前任务返回 top-k 相关历史教训（当前视图，"
-                        "带 confidence 置信度与 provenance 出处）。agent 启动前用它注入相关记忆，"
-                        "而非把整个 store 灌进 context。"),
+                        "带 confidence 置信度与 provenance 出处）。走两段式：默认只回轻量 index 行"
+                        "（title/summary/path），对真正相关的少量条目再传 full=true 取正文全文——"
+                        "别第一段就 full 全量灌 context。"),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "任务/场景关键词，空格分隔"},
                 "top": {"type": "integer", "description": "返回条数，默认 8", "default": 8},
+                "full": {"type": "boolean", "default": False,
+                         "description": "两段式第二段：附带命中条目正文全文（配小 top 用）"},
             },
             "required": ["query"],
         },
@@ -76,6 +79,18 @@ class MemoryMCP:
         self.cfg = config
         self.store = MemoryStore(config)
         self.adapter = LocalMarkdownAdapter(config["store_dir"])
+        # 挂载接口两槽位：steering（「记什么」声明，注入 memory_write 描述）+ read_only（只读挂载不暴露写）
+        self.read_only = bool(config.get("read_only"))
+        steering = (config.get("steering") or "").strip()
+        self.tools = []
+        for t in TOOLS:
+            if t["name"] == "memory_write":
+                if self.read_only:
+                    continue
+                if steering:
+                    t = dict(t)
+                    t["description"] = f"【记什么·steering】{steering}\n{t['description']}"
+            self.tools.append(t)
 
     # ---------- tool 实现 ----------
     def tool_memory_search(self, args):
@@ -83,6 +98,7 @@ class MemoryMCP:
         if not query:
             return "（query 为空）"
         top = int(args.get("top", 8) or 8)
+        full = bool(args.get("full"))
         results = self.store.search(query, top)
         if not results:
             return "（无命中。可换关键词，或先 reindex）"
@@ -90,12 +106,15 @@ class MemoryMCP:
             {"score": round(f * 1000, 1), "type": r["type"], "title": r["title"],
              "path": r["path"], "summary": r["summary"],
              "confidence": MemoryStore.parse_confidence(r["confidence"]),
-             "provenance": r["provenance"] or None}
+             "provenance": r["provenance"] or None,
+             **({"body": self.store.body_of(r["path"])} if full else {})}
             for f, rec, r in results
         ]
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     def tool_memory_write(self, args):
+        if self.read_only:
+            raise ValueError("store 为只读挂载（config read_only=true），memory_write 不可用")
         title = args.get("title", "").strip()
         content = args.get("content", "")
         if not title or not content:
@@ -129,7 +148,7 @@ class MemoryMCP:
             result = {"protocolVersion": PROTOCOL_VERSION,
                       "capabilities": {"tools": {}}, "serverInfo": SERVER_INFO}
         elif method == "tools/list":
-            result = {"tools": TOOLS}
+            result = {"tools": self.tools}
         elif method == "tools/call":
             p = msg.get("params", {})
             result = self.call_tool(p.get("name"), p.get("arguments", {}) or {})

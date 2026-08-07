@@ -56,15 +56,16 @@ Doer → trace → Reflector(critic + librarian) → Store → 检索注入回 D
 ## 横向对照：外部 agent memory 产品在解哪道题
 
 「agent memory」是个被滥用的标签，市面同名产品其实在解完全不同的题。用本 kit 的四角色
-坐标去拆，差异立刻清楚（三例采于 2026-06-18~19 Hacker News / X）：
+坐标去拆，差异立刻清楚（前三例采于 2026-06-18~19 Hacker News / X，第四例于 2026-08-01 读源码采集）：
 
 | 产品 | 它的「记忆」是什么 | 命中本 kit 哪个角色 | 形态 |
 |---|---|---|---|
 | **Parcle**（parcle.ai） | 跨 70+ 系统的**业务数据**，建索引后按需检索一小撮 | 几乎全是 **retrieval**（机器全自动，无 reflector/人审） | 闭源 / 企业销售；自报 token −70%、agent 2x、97% 准确 |
 | **Draft**（github.com/idodekerobo/draft，MIT） | 团队的**产品决策/上下文**（采自 Slack/Granola/GitHub/会话） | **Capture→Review→Sync→Inject** ≈ Doer trace → **HITL 版 reflector** → librarian(git) → 注入 | 开源 / 本地优先；多 agent（CC/Codex/Cursor/Hermes） |
 | **Perplexity Brain in Computer**（2026-06-19 发布） | 跨会话**持续学习**沉淀的「上下文图谱」，给 Computer 建状态、越跑越有状态 | **retrieval（图谱检索）+ 隐式 librarian（自动累积状态）**，仍**无显式 reflector/人审** | 闭源 / Perplexity Max 研究预览 |
+| **qm**（github.com/yc-software/qm，MIT） | 一个人 / 一个房间的**长期事实**（谁是谁、在做什么、习惯怎么工作）——一个 markdown notebook，硬顶 300 条 | **完整的 librarian**（逐轮抽取 + 定期整理）**外加写入侧 scope 约束**；**完全没有 critic**，也没有检索——notebook 尾部整段注入 | 开源 / YC 官方；14 万行 TS 的系统里，记忆层只有 680 行 |
 
-三点对本 kit 的设计校验：
+四点对本 kit 的设计校验：
 
 1. **Parcle 证明「纯 retrieval」也能成产品**，但它没有 reflector/evolve 冷环——记忆只进不「反思提炼」，
    靠的是数据本身够结构化（企业数仓）。本 kit 面向的是**非结构化经验教训**（踩过的坑），所以
@@ -78,6 +79,16 @@ Doer → trace → Reflector(critic + librarian) → Store → 检索注入回 D
    **非结构化经验教训**（踩过的坑、判错的边界）时，缺了 critic 评估这道工序，记忆只会越积越噪、
    检索召回越来越脏——reflector 不是可选项而是命门。三家产品同方向，反而把「本 kit 为什么不省 reflector」
    这件事衬托得更立得住。
+4. **qm 是四例里界线划得最清的一个，因为它是唯一能读源码的。** 它同样没有 critic——为上面那条再投一票——
+   但原因不是偷工减料：**qm 和本 kit 记的根本不是同一种记忆。** qm 记的是**关于人和世界的事实**
+   （facts about），本 kit 记的是**关于自己该怎么做得更好的教训**（lessons learned）。这一条差异会传导到
+   下游每一个决策。一个人的长期事实数量是**有界的**，所以 qm 敢把 notebook 硬顶在 300 条、定期整理压缩，
+   然后**整段注入**，根本不需要检索；教训的数量随任务空间**无界增长**，所以本 kit 必须在读取侧用 top-k 筛。
+   一句话讲透：**「定期整理」和「语义检索」是同一道题的两种解法**——一个在写入侧压缩，一个在读取侧筛选，
+   选哪个取决于你的记忆是不是有界的。qm 给本 kit 的增量不是「该加 critic」，而是给 `librarian` 桩补上了
+   一组闭源产品不可能展示的**写入侧闸门**：不可信出处改写、禁止从 assistant 自己的回复推导偏好的抽取契约、
+   无人说话的自主轮次降级规则、以及输出结构化动作而非重写全文的整理方式。这四条已落进
+   `librarian/README.md` 与 `reflector/README.md`。
 
 > [!NOTE]
 > 2026-06-19 一个值得关注的外部信号：Agent Infra / 运行时记忆层同日在中（fastclaw/Workbuddy）、英

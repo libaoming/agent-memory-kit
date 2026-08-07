@@ -11,9 +11,10 @@ memory_search.py — agent-memory-kit 的检索注入后端（Store → 检索 �
 与原版唯一区别：store 路径 / frontmatter 字段名 / 输出格式 / 算法超参
 全部从 config.json 注入，Obsidian 只是其中一种配置（output_format=obsidian）。
 
-用法：
+用法（两段式检索，对齐官方 memory「先读目录再读条目」）：
   python3 memory_search.py --reindex [--config config.json]      # 重建索引
-  python3 memory_search.py "区域 班次 首遍吞" [--top 8] [--config config.json]
+  python3 memory_search.py "区域 班次 首遍吞" [--top 8]           # 第一段：只回 index 行（title/summary/path）
+  python3 memory_search.py "区域 班次" --top 3 --full             # 第二段：对真正相关的少量条目附正文全文
 索引落在 config 指定的 db_path（默认脚本同目录 .memory_index.db），只读 store。
 """
 import os, re, sys, json, sqlite3, argparse, glob
@@ -96,6 +97,12 @@ class MemoryStore:
         """按 config 的字段映射取 frontmatter 值。"""
         return fm.get(self.fm.get(logical, logical), "")
 
+    @staticmethod
+    def scope_of(relpath):
+        """目录即 scope：store 根下第一级子目录名（如 org/、task/）；根下散文件 → default。"""
+        parts = relpath.replace(os.sep, "/").split("/")
+        return parts[0] if len(parts) > 1 else "default"
+
     def iter_pages(self):
         for p in glob.glob(os.path.join(self.store_dir, "**", "*.md"), recursive=True):
             base = os.path.basename(p)
@@ -103,8 +110,10 @@ class MemoryStore:
                 continue
             fm, body = self.parse_md(p)
             title = self._field(fm, "title") or os.path.splitext(base)[0]
+            rel = os.path.relpath(p, self.store_dir)
             yield {
-                "path": os.path.relpath(p, self.store_dir),
+                "scope": self.scope_of(rel),
+                "path": rel,
                 "title": title,
                 "summary": self._field(fm, "summary"),
                 "tags": self._field(fm, "tags"),
@@ -135,15 +144,15 @@ class MemoryStore:
             os.remove(self.db_path)
         db = sqlite3.connect(self.db_path)
         db.execute("""CREATE VIRTUAL TABLE pages USING fts5(
-            path UNINDEXED, title, summary, tags, type UNINDEXED, updated UNINDEXED,
+            path UNINDEXED, scope UNINDEXED, title, summary, tags, type UNINDEXED, updated UNINDEXED,
             provenance UNINDEXED, confidence UNINDEXED,
             body, tokenize='trigram')""")
         n = 0
         for d in self.iter_pages():
             db.execute(
-                "INSERT INTO pages(path,title,summary,tags,type,updated,provenance,confidence,body) "
-                "VALUES(?,?,?,?,?,?,?,?,?)",
-                (d["path"], d["title"], d["summary"], d["tags"], d["type"], d["updated"],
+                "INSERT INTO pages(path,scope,title,summary,tags,type,updated,provenance,confidence,body) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (d["path"], d["scope"], d["title"], d["summary"], d["tags"], d["type"], d["updated"],
                  d["provenance"], d["confidence"], d["body"]))
             n += 1
         db.commit(); db.close()
@@ -159,7 +168,8 @@ class MemoryStore:
             return self.cfg["no_date_weight"]
 
     # ---------- 检索：FTS + LIKE → RRF + recency ----------
-    def search(self, query, top=8, half_life=None):
+    def search(self, query, top=8, half_life=None, scope=None):
+        """scope: None=全部；或 scope 名列表（如 ["org","task"]）——目录即 scope。"""
         half_life = half_life or self.cfg["half_life_days"]
         if not os.path.exists(self.db_path):
             self.reindex()
@@ -167,18 +177,24 @@ class MemoryStore:
         db.row_factory = sqlite3.Row
         terms = [t for t in re.split(r"\s+", query.strip()) if t]
 
+        scope_sql, scope_args = "", []
+        if scope:
+            scopes = [scope] if isinstance(scope, str) else list(scope)
+            scope_sql = " AND scope IN (%s)" % ",".join("?" * len(scopes))
+            scope_args = scopes
+
         fts_rank, like_rank, rows_by_path = {}, {}, {}
 
         fts_terms = [t for t in terms if len(t) >= 3]
         if fts_terms:
             match = " OR ".join('"%s"' % t.replace('"', '') for t in fts_terms)
             w = self.cfg["fts_weights"]
-            # 列序: path,title,summary,tags,type,updated,provenance,confidence,body
-            bm25 = f"bm25(pages, 0,{w['title']},{w['summary']},{w['tags']},0,0,0,0,{w['body']})"
+            # 列序: path,scope,title,summary,tags,type,updated,provenance,confidence,body
+            bm25 = f"bm25(pages, 0,0,{w['title']},{w['summary']},{w['tags']},0,0,0,0,{w['body']})"
             try:
-                q = (f"SELECT path,title,summary,tags,type,updated,provenance,confidence, {bm25} AS r "
-                     "FROM pages WHERE pages MATCH ? ORDER BY r LIMIT 60")
-                for i, row in enumerate(db.execute(q, (match,))):
+                q = (f"SELECT path,scope,title,summary,tags,type,updated,provenance,confidence, {bm25} AS r "
+                     f"FROM pages WHERE pages MATCH ?{scope_sql} ORDER BY r LIMIT 60")
+                for i, row in enumerate(db.execute(q, (match, *scope_args))):
                     fts_rank[row["path"]] = i
                     rows_by_path[row["path"]] = row
             except sqlite3.OperationalError:
@@ -187,13 +203,13 @@ class MemoryStore:
         lw = self.cfg["like_weights"]
         for t in terms:
             like = f"%{t}%"
-            q = ("SELECT path,title,summary,tags,type,updated,provenance,confidence, "
+            q = ("SELECT path,scope,title,summary,tags,type,updated,provenance,confidence, "
                  f"(CASE WHEN title LIKE ? THEN {lw['title']} ELSE 0 END)+"
                  f"(CASE WHEN summary LIKE ? THEN {lw['summary']} ELSE 0 END)+"
                  f"(CASE WHEN tags LIKE ? THEN {lw['tags']} ELSE 0 END)+"
                  f"(CASE WHEN body LIKE ? THEN {lw['body']} ELSE 0 END) AS hit "
-                 "FROM pages WHERE hit>0")
-            for row in db.execute(q, (like, like, like, like)):
+                 f"FROM pages WHERE hit>0{scope_sql}")
+            for row in db.execute(q, (like, like, like, like, *scope_args)):
                 p = row["path"]
                 like_rank[p] = like_rank.get(p, 0) + row["hit"]
                 rows_by_path.setdefault(p, row)
@@ -219,21 +235,38 @@ class MemoryStore:
         scored.sort(key=lambda x: -x[0])
         return scored[:top]
 
+    # ---------- 正文取回（两段式第二段） ----------
+    BODY_MAX_CHARS = 6000
+
+    def body_of(self, relpath):
+        """按 index 行的 path 取该条记忆正文（剥 frontmatter，超长截断）。"""
+        try:
+            _, body = self.parse_md(os.path.join(self.store_dir, relpath))
+        except OSError:
+            return "（正文读取失败）"
+        body = body.strip()
+        if len(body) > self.BODY_MAX_CHARS:
+            body = body[: self.BODY_MAX_CHARS] + "\n…（正文截断）"
+        return body
+
     # ---------- 输出格式 ----------
-    def format(self, results):
+    def format(self, results, full=False):
         fmt = self.cfg["output_format"]
         if fmt == "json":
             return json.dumps([
                 {"score": round(f * 1000, 1), "type": r["type"], "title": r["title"],
-                 "path": r["path"], "summary": r["summary"],
+                 "path": r["path"], "scope": r["scope"], "summary": r["summary"],
                  "confidence": self.parse_confidence(r["confidence"]),
-                 "provenance": r["provenance"] or None}
+                 "provenance": r["provenance"] or None,
+                 **({"body": self.body_of(r["path"])} if full else {})}
                 for f, rec, r in results
             ], ensure_ascii=False, indent=2)
         lines = []
         for f, rec, r in results:
             conf = self.parse_confidence(r["confidence"])
             tail = ""
+            if r["scope"] and r["scope"] != "default":
+                tail += f"  ⟨{r['scope']}⟩"
             if conf is not None:
                 tail += f"  ⟨conf {conf:.2f}⟩"
             if r["provenance"]:
@@ -244,6 +277,9 @@ class MemoryStore:
                 s = f"{f*1000:5.1f} | {r['type'] or '?':9} | [[{r['title']}]] | {r['path']}{tail}"
                 if r["summary"]:
                     s += f"\n        ↳ {r['summary'][:90]}"
+            if full:
+                body = self.body_of(r["path"])
+                s += "\n" + "\n".join("    " + ln for ln in body.splitlines())
             lines.append(s)
         return "\n".join(lines)
 
@@ -255,6 +291,10 @@ def main():
     ap.add_argument("--reindex", action="store_true")
     ap.add_argument("--top", type=int, default=8)
     ap.add_argument("--half-life", type=int, default=None, help="时间衰减半衰期（天）")
+    ap.add_argument("--scope", default=None,
+                    help="按 scope 过滤（store 根下第一级子目录名，逗号分隔多值，如 org 或 org,task）")
+    ap.add_argument("--full", action="store_true",
+                    help="两段式第二段：附带命中条目正文全文（默认只出轻量 index 行；配小 --top 用）")
     a = ap.parse_args()
 
     store = MemoryStore(load_config(a.config))
@@ -264,12 +304,13 @@ def main():
         if not a.query:
             return
     if not a.query:
-        print('用法: python3 memory_search.py "查询词" [--top N] [--config c.json] | --reindex')
+        print('用法: python3 memory_search.py "查询词" [--top N] [--scope org,task] [--config c.json] | --reindex')
         return
-    res = store.search(a.query, a.top, a.half_life)
+    scopes = [s.strip() for s in a.scope.split(",") if s.strip()] if a.scope else None
+    res = store.search(a.query, a.top, a.half_life, scope=scopes)
     if not res:
         print("（无命中。可换关键词，或 --reindex 后重试）"); return
-    print(store.format(res))
+    print(store.format(res, full=a.full))
 
 
 if __name__ == "__main__":
